@@ -1,3 +1,5 @@
+//no arbiter or decoder is present since only one slave is taken
+
 `timescale 1ns / 1ps
  
 `define NON_SEQ     2'd0
@@ -5,22 +7,28 @@
 `define BUSY 	    2'd2
 `define IDLE        2'd3
  
-`define OKAY  2'b00
-`define ERROR 2'b01
+`define OKAY  2'b00 //indicate transfer is successful
+`define ERROR 2'b01  //transfer is unsuccessful
 `define RETRY 2'b10
 `define SPLIT 2'b11
- 
+
+//basic transfer consists of two phases address phase and data phase
  
 module ahb_slave(
-input clk,
-input [31:0] hwdata,
+input clk, //global clock
+input [31:0] hwdata,//write signal from master, user will be writing data using this bus
 input [31:0] haddr, 
-input [2:0] hsize,
-input [2:0] hburst,
+
+//control include the burst type ,size, hwrite,hsel,htrans
+input [2:0] hsize,//indicate the size of data transfer,byte ,halfword,word
+input [2:0] hburst,//type of burst type.hburst is 3 byte so total 8 
+//combinations are possible.single,incr,wrap4,incr4,wrap8,incr8,wrap16,incr16
+
+
 input hresetn, hsel, hwrite,
-input [1:0] htrans,
-output reg [1:0] hresp,
-output reg hready,
+input [1:0] htrans,//type of transfer non sequential,seq,idle and busy
+output reg [1:0] hresp,//different responses are okay,error,retry,split
+output reg hready,//this signal is from slave,where it generates when slave is ready 
 output reg [31:0] hrdata
 );
  
@@ -29,19 +37,21 @@ output reg [31:0] hrdata
 reg [7:0] mem[256] = '{default : 12};
  
 ///////////////////////////////////////////////////////////////////////////////////////////
-function bit[31:0] single_tr (input bit [31:0] addr, input bit [2:0] hsize);
+
+//burst single transfer//
+function bit[31:0] single_tr (input bit [31:0] addr//address where user want to read or write data//, input bit [2:0] hsize);
     unique case(hsize)
-    3'b000: begin
+    3'b000: begin  //single byte of valid data
          mem[addr]  = hwdata[7:0];   
     end 
     
-    3'b001: begin
-         mem[addr]     = hwdata[7:0];
-         mem[addr + 1] = hwdata[15:8];
+    3'b001: begin  //two byte of valid data
+         mem[addr]     = hwdata[7:0]; //address
+         mem[addr + 1] = hwdata[15:8]; //next address
     end
     
-    3'b010: begin
-         mem[addr]     = hwdata[7:0];
+    3'b010: begin  //4 byte of valid data
+         mem[addr]     = hwdata[7:0];//storing lower byte of hwdata into mem[addr]
          mem[addr + 1] = hwdata[15:8];
          mem[addr + 2] = hwdata[23:16];
          mem[addr + 3] = hwdata[31:24];
@@ -54,6 +64,8 @@ endfunction
  
 ///////////////////////////////////////////////////////////////////////////////////
 function bit[31:0] unincr_wr (input bit [31:0] addr, input bit [2:0] hsize);
+/*address boundary =valid data size * transactions =32*32 =1024 =1kb
+
     bit [31:0] raddr;
     unique case(hsize)
     
@@ -87,6 +99,9 @@ endfunction
  
  
 //////////////////////////////////////////////////////////////////////////////
+
+/*this is the function which returns the boundary*/
+
 function bit[7:0] boundary(input bit [2:0] hburst, input [2:0] hsize);
    bit [7:0] temp;
    unique case(hsize)
@@ -126,8 +141,11 @@ function bit[7:0] boundary(input bit [2:0] hburst, input [2:0] hsize);
     return temp;
     
 endfunction
- 
- 
+
+///////////////////////////////////////////////////////////////////////////////////////////////
+
+/* it update the memory and calculate address for next transaction */
+
 function bit[31:0] wrap_wr (input bit [31:0] addr, input bit [7:0] boundary, input [2:0] hsize);
   bit [31:0] addr1, addr2, addr3,addr4;
   
@@ -412,7 +430,7 @@ end
  
  
  
-integer len_count = 0;
+integer len_count = 0;//keep the track of burst length
 reg first = 0;
 reg [31:0] retaddr;
 reg [31:0] next_addr;
